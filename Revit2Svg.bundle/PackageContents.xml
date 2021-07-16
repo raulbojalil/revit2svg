@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ApplicationPackage>
+  <Components Description="Export Revit to SVG">
+    <RuntimeRequirements OS="Win64"
+                         Platform="Revit"
+                         SeriesMin="R2018"
+                         SeriesMax="R2021" />
+    <ComponentEntry AppName="Revit2Svg"
+                    Version="1.0.0"
+                    ModuleName="./Contents/Revit2Svg.addin"
+                    AppDescription="Exports Revit to SVG"
+                    LoadOnCommandInvocation="False"
+                    LoadOnRevitStartup="True" />
+  </Components>
+</ApplicationPackage>
