@@ -350,5 +350,5 @@ MigrationBackup/
 .ionide/
 
 # Custom
-RevitImageExporter.bundle/Contents/
+Revit2Svg.bundle/Contents/
 
