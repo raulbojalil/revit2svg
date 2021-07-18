@@ -6,12 +6,12 @@ using System.Threading.Tasks;
 
 namespace Revit2Svg
 {
-    public class Utils
+    public static class Utils
     {
-        public static string NormalizeDouble(double d)
+        public static double Normalize(this double d)
         {
-            if (d.ToString().Contains("E")) return "0";
-            return d.ToString();
+            if (d.ToString().Contains("E")) return 0;
+            return d;
         }
     }
 }
