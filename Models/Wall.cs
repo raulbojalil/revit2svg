@@ -6,14 +6,12 @@ using System.Threading.Tasks;
 
 namespace Revit2Svg.Models
 {
-    public class StartEndLine
+    public class Wall
     {
-        public double X1 { get; set; }
-        public double Y1 { get; set; }
-        public double X2 { get; set; }
-        public double Y2 { get; set; }
-        public double Width { get; set; }
         public int Level { get; set; }
         public string Description { get; set; }
+        public double Width { get; set; }
+        public Line Line { get; set; }
+        public Rectangle BoundingBox { get; set; }
     }
 }
