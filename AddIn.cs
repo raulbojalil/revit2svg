@@ -5,13 +5,12 @@ using DesignAutomationFramework;
 using Autodesk.Revit.ApplicationServices;
 using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using Revit2Svg.Models;
 using Revit2Svg;
 
-namespace RevitImageExporter
+namespace Revit2Svg
 {
     [Transaction(TransactionMode.Manual)]
     [Regeneration(RegenerationOption.Manual)]
@@ -51,19 +50,29 @@ namespace RevitImageExporter
 
                 tx.RollBack();
             }
-
         }
 
         public static void DrawWalls(Document doc)
         {
-            var wallsCollector = (new FilteredElementCollector(doc).OfClass(typeof(Wall)));
+
             var lines = new List<StartEndLine>();
 
             var offsetX = double.MaxValue;
             var offsetY = double.MaxValue;
+
+            var svgWidth = 0;
+            var svgHeight = 0;
             var scale = 10;
-            ElementId currentLevelId = null;
             var currentLevel = 0;
+
+            var svgBuilder = new StringBuilder();
+            var levelHeights = new Dictionary<int, double>();
+
+            ElementId currentLevelId = null;
+
+            var levels = (new FilteredElementCollector(doc).OfClass(typeof(Level))).ToElements();
+
+            var wallsCollector = (new FilteredElementCollector(doc).OfClass(typeof(Wall)));
 
             foreach (Wall wall in wallsCollector.OrderBy(x => (x as Wall).LevelId.IntegerValue))
             {
@@ -84,18 +93,15 @@ namespace RevitImageExporter
                     X2 = (line.Origin.X + (line.Direction.X * line.Length)) * scale,
                     Y2 = (line.Origin.Y + (line.Direction.Y * line.Length)) * scale,
                     Width = wall.Width,
-                    Level = currentLevel
+                    Level = currentLevel,
+                    Description = $"{wall.Name} (Level: {levels.FirstOrDefault(x => x.Id.IntegerValue == wall.LevelId.IntegerValue)?.Name ?? "Unknown"})"
                 });
             }
-
-            var svgBuilder = new StringBuilder();
-            var levelHeights = new Dictionary<int, double>();
 
             levelHeights.Add(0, 0);
 
             foreach (var line in lines.OrderBy(x => x.Level))
             {
-
                 if (!levelHeights.ContainsKey(line.Level + 1))
                     levelHeights.Add(line.Level + 1, double.MinValue);
 
@@ -110,21 +116,24 @@ namespace RevitImageExporter
 
             foreach (var line in lines)
             {
-                var x1 = Utils.NormalizeDouble(line.X1 + Math.Abs(offsetY));
-                var y1 = Utils.NormalizeDouble(line.Y1 + Math.Abs(offsetY) + levelHeights[line.Level] + (Math.Abs(offsetY) * line.Level));
-                var x2 = Utils.NormalizeDouble(line.X2 + Math.Abs(offsetX));
-                var y2 = Utils.NormalizeDouble(line.Y2 + Math.Abs(offsetY) + levelHeights[line.Level] + (Math.Abs(offsetY) * line.Level));
+                var x1 = line.X1 + Math.Abs(offsetX);
+                var y1 = line.Y1 + Math.Abs(offsetY) + levelHeights[line.Level] + (Math.Abs(offsetY) * line.Level);
+                var x2 = line.X2 + Math.Abs(offsetX);
+                var y2 = line.Y2 + Math.Abs(offsetY) + levelHeights[line.Level] + (Math.Abs(offsetY) * line.Level);
                 var strokeWidth = line.Width * scale;
 
+                if (svgWidth < x1) svgWidth = Convert.ToInt32(x1);
+                if (svgWidth < x2) svgWidth = Convert.ToInt32(x2);
+                if (svgHeight < y1) svgHeight = Convert.ToInt32(y1);
+                if (svgHeight < y2) svgHeight = Convert.ToInt32(y2);
+
                 svgBuilder.AppendLine(
-                    $"<line x1=\"{x1}\" y1=\"{y1}\" x2=\"{x2}\" y2=\"{y2}\" style=\"stroke:rgb(0,0,0);stroke-width:{strokeWidth}\" />");
+                    $"<!-- {line.Description} --><line x1=\"{Utils.NormalizeDouble(x1)}\" y1=\"{Utils.NormalizeDouble(y1)}\" x2=\"{Utils.NormalizeDouble(x2)}\" y2=\"{Utils.NormalizeDouble(y2)}\" style=\"stroke:rgb(0,0,0);stroke-width:{strokeWidth}\" />");
             }
 
-            var contents = $"<!DOCTYPE html><html><body><svg height=\"2000\" width=\"2000\">{svgBuilder}</svg></body></html>";
+            var contents = $"<!DOCTYPE html><html><body><svg height=\"{svgHeight}\" width=\"{svgWidth}\">{svgBuilder}</svg></body></html>";
             File.WriteAllText(@".\svg_data.html", contents);
         }
-
-        
 
         public ExternalDBApplicationResult OnShutdown(ControlledApplication application)
         {

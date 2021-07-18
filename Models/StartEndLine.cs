@@ -14,5 +14,6 @@ namespace Revit2Svg.Models
         public double Y2 { get; set; }
         public double Width { get; set; }
         public int Level { get; set; }
+        public string Description { get; set; }
     }
 }
