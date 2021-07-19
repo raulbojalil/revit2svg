@@ -24,97 +24,113 @@ namespace Revit2Svg
             var svgWidth = 0;
             var svgHeight = 0;
 
-            var currentLevelIndex = 0;
+            ForgeTypeId units = null;
+
+            var currentLevelIndex = -1;
             double currentLevelOffset = 0;
 
             var svgBuilder = new StringBuilder();
-            var levelHeights = new Dictionary<int, double>();
-
-            ElementId currentLevelId = null;
-
-            var levels = (new FilteredElementCollector(doc).OfClass(typeof(Level))).ToElements();
+            var levelBoundingBoxes = new Dictionary<int, Rectangle>();
+            
+            var levels = (new FilteredElementCollector(doc).OfClass(typeof(Level)))
+                .ToElements()
+                .Select(x => x as Level)
+                .OrderBy(x => x.LevelId.IntegerValue)
+                .ToList();
 
             var wallsCollector = (new FilteredElementCollector(doc).OfClass(typeof(Autodesk.Revit.DB.Wall)));
 
-            foreach (Autodesk.Revit.DB.Wall wall in wallsCollector.OrderBy(x => (x as Autodesk.Revit.DB.Wall).LevelId.IntegerValue))
+            foreach (Autodesk.Revit.DB.Wall wall in wallsCollector)
             {
-                if (currentLevelId == null)
-                    currentLevelId = wall.LevelId;
-
-                if (currentLevelId.IntegerValue != wall.LevelId.IntegerValue)
-                    currentLevelIndex++;
-
-                currentLevelId = wall.LevelId;
-
-                //var geometry = wall.get_Geometry(new Options());
-                //foreach(var item in geometry)
-                //{
-
-                //}
-
                 var line = ((wall.Location as LocationCurve).Curve as Autodesk.Revit.DB.Line);
                 var boundingBox = wall.get_BoundingBox(null);
 
-                var units = wall.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).GetUnitTypeId();
+                units = wall.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).GetUnitTypeId();
                 var length = wall.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).AsDouble();
                 var actualLength = UnitUtils.ConvertFromInternalUnits(length, units);
+                var level = levels.First(x => x.Id.IntegerValue == wall.LevelId.IntegerValue);
 
                 walls.Add(new Wall()
                 {
-                    LevelIndex = currentLevelIndex,
-                    LevelName = levels.FirstOrDefault(x => x.Id.IntegerValue == wall.LevelId.IntegerValue)?.Name ?? "Unknown",
+                    LevelIndex = levels.IndexOf(level),
+                    LevelName = level.Name,
+                    LevelElevation = level.Elevation,
                     Description = $"{wall.Name} ({actualLength} {units.TypeId})",
                     Line = FixLine(scale, line, boundingBox),
                     BoundingBox = GetRectangleFromBoundingBox(scale, boundingBox),
                     Width = wall.Width,
-                    
                 });
             }
 
-            levelHeights.Add(0, 0);
-
             foreach (var wall in walls.OrderBy(x => x.LevelIndex))
             {
-                if (!levelHeights.ContainsKey(wall.LevelIndex + 1))
-                    levelHeights.Add(wall.LevelIndex + 1, double.MinValue);
+                if (!levelBoundingBoxes.ContainsKey(wall.LevelIndex))
+                    levelBoundingBoxes.Add(wall.LevelIndex, new Rectangle()
+                    {
+                        MinX = double.MaxValue,
+                        MinY = double.MaxValue,
+                        MaxX = double.MinValue,
+                        MaxY = double.MinValue
+                    });
 
-                if (wall.Line.Y1 > levelHeights[wall.LevelIndex + 1]) 
-                    levelHeights[wall.LevelIndex + 1] = wall.Line.Y1;
-                if (wall.Line.Y2 > levelHeights[wall.LevelIndex + 1]) 
-                    levelHeights[wall.LevelIndex + 1] = wall.Line.Y2;
-                if (wall.BoundingBox.Y + wall.BoundingBox.Height > levelHeights[wall.LevelIndex + 1])
-                    levelHeights[wall.LevelIndex + 1] = wall.BoundingBox.Y + wall.BoundingBox.Height;
+                if(renderLines)
+                    levelBoundingBoxes[wall.LevelIndex].EnsureContainsLine(wall.Line);
 
-                if (wall.Line.X1 < offsetX) offsetX = wall.Line.X1;
-                if (wall.Line.Y1 < offsetY) offsetY = wall.Line.Y1;
-                if (wall.Line.X2 < offsetX) offsetX = wall.Line.X2;
-                if (wall.Line.Y2 < offsetY) offsetY = wall.Line.Y2;
+                if(renderRects)
+                    levelBoundingBoxes[wall.LevelIndex].EnsureContainsRectangle(wall.BoundingBox);
 
-                if (wall.BoundingBox.X < offsetX) 
-                    offsetX = wall.BoundingBox.X;
-                if (wall.BoundingBox.Y < offsetY) 
-                    offsetY = wall.BoundingBox.Y;
+                if (renderLines)
+                {
+                    if (wall.Line.X1 < offsetX) offsetX = wall.Line.X1;
+                    if (wall.Line.Y1 < offsetY) offsetY = wall.Line.Y1;
+                    if (wall.Line.X2 < offsetX) offsetX = wall.Line.X2;
+                    if (wall.Line.Y2 < offsetY) offsetY = wall.Line.Y2;
+                }
+
+                if (renderRects)
+                {
+                    if (wall.BoundingBox.MinX < offsetX) offsetX = wall.BoundingBox.MinX;
+                    if (wall.BoundingBox.MinY < offsetY) offsetY = wall.BoundingBox.MinY;
+                }
             }
 
-            currentLevelIndex = -1;
 
             foreach (var wall in walls.OrderBy(x => x.LevelIndex))
             {
                 if(currentLevelIndex != wall.LevelIndex)
                 {
-                    currentLevelOffset += levelHeights[wall.LevelIndex]
-                    + (Math.Abs(offsetY) * wall.LevelIndex)
-                    + (paddingBetweenLevels * wall.LevelIndex);
+                    currentLevelOffset += wall.LevelIndex == 0 
+                        ? 0 
+                        : levelBoundingBoxes[wall.LevelIndex-1].Height + paddingBetweenLevels;
 
+                    var levelBoundingBox = levelBoundingBoxes[wall.LevelIndex];
+                    
                     if (renderFloorNames)
                     {
                         currentLevelOffset += 10; //Padding around the text
 
+                        var floorHeight = UnitUtils.ConvertFromInternalUnits(
+                            levels[wall.LevelIndex + 1].Elevation - levels[wall.LevelIndex].Elevation, 
+                            units);
+
+                        var floorWidth = UnitUtils.ConvertFromInternalUnits(
+                            levelBoundingBox.Width / scale,
+                            units);
+
                         svgBuilder.AppendLine(
-                            $"<text x=\"0\" y=\"{currentLevelOffset}\" fill=\"black\">{wall.LevelName}</text>");
+                            $"<text x=\"0\" y=\"{currentLevelOffset}\" fill=\"black\">{wall.LevelName} (Width: {Math.Round(floorWidth, 2)}, Height: {Math.Round(floorHeight, 2)} {units.TypeId})</text>");
 
                         currentLevelOffset += 10; //Padding around the text
                     }
+
+                    var lrectX = levelBoundingBox.MinX + Math.Abs(offsetX);
+                    var lrectY = levelBoundingBox.MinY + Math.Abs(offsetY) + currentLevelOffset;
+                    var lrectWidth = levelBoundingBox.Width;
+                    var lrectHeight = levelBoundingBox.Height;
+
+                    svgBuilder.AppendLine(
+                       $"<rect x=\"{lrectX.Normalize()}\" y=\"{lrectY.Normalize()}\" width=\"{lrectWidth.Normalize()}\" height=\"{lrectHeight.Normalize()}\" style=\"stroke:rgb(0,0,255);fill: none;stroke-width:2\" />");
+
                 }
 
                 currentLevelIndex = wall.LevelIndex;
@@ -125,13 +141,13 @@ namespace Revit2Svg
                 var y2 = wall.Line.Y2 + Math.Abs(offsetY) + currentLevelOffset;
                 var strokeWidth = wall.Width * scale;
 
-                var rectX = wall.BoundingBox.X + Math.Abs(offsetX);
-                var rectY = wall.BoundingBox.Y + Math.Abs(offsetY) + currentLevelOffset;
+                var rectX = wall.BoundingBox.MinX + Math.Abs(offsetX);
+                var rectY = wall.BoundingBox.MinY + Math.Abs(offsetY) + currentLevelOffset;
                 var rectWidth = wall.BoundingBox.Width;
                 var rectHeight = wall.BoundingBox.Height;
 
-                if (svgWidth < rectX + rectWidth) svgWidth = Convert.ToInt32(rectX + rectWidth);
-                if (svgHeight < rectY + rectHeight) svgHeight = Convert.ToInt32(rectY + rectHeight);
+                svgWidth = Math.Max(svgWidth, Convert.ToInt32(rectX + rectWidth));
+                svgHeight = Math.Max(svgHeight, Convert.ToInt32(rectY + rectWidth));
 
                 svgBuilder.AppendLine(
                     $"<!-- {wall.Description} -->");
@@ -147,7 +163,7 @@ namespace Revit2Svg
                     svgBuilder.AppendLine(
                         $"<rect x=\"{rectX.Normalize()}\" y=\"{rectY.Normalize()}\" width=\"{rectWidth.Normalize()}\" height=\"{rectHeight.Normalize()}\" style=\"stroke:rgb(255,0,0);fill: none;stroke-width:1\" />");
                 }
-
+                
             }
 
             var contents = $"<!DOCTYPE html><html><body><svg height=\"{svgHeight}\" width=\"{svgWidth}\">\r\n{svgBuilder}</svg></body></html>";
@@ -157,8 +173,9 @@ namespace Revit2Svg
         private static Line FixLine(double scale, Autodesk.Revit.DB.Line line, BoundingBoxXYZ boundingBox)
         {
             //Fit the lines inside the bounding boxes
-            var x1 = line.Direction.X >= 0 ? boundingBox.Min.X : boundingBox.Max.X;
-            var y1 = line.Direction.Y >= 0 ? boundingBox.Min.Y : boundingBox.Max.Y;
+
+            var originX = line.Direction.X >= 0 ? boundingBox.Min.X : boundingBox.Max.X;
+            var originY = line.Direction.Y >= 0 ? boundingBox.Min.Y : boundingBox.Max.Y;
 
             var offsetX = ((boundingBox.Max.X - boundingBox.Min.X) / 2)
                 * (Math.Abs(line.Direction.Y) * (line.Direction.X >= 0 ? 1 : -1));
@@ -171,24 +188,34 @@ namespace Revit2Svg
                 offsetY = 0;
             }
 
+            var sourceX = (originX + offsetX) * scale;
+            var sourceY = (originY + offsetY) * scale;
+            var destinationX = ((originX + (line.Direction.X * line.Length)) + offsetX) * scale;
+            var destinationY = ((originY + (line.Direction.Y * line.Length)) + offsetY) * scale;
 
-            return new Line()
+            //Normalize the line to go from left to right
+            return sourceX <= destinationX ? new Line()
             {
-                X1 = (x1 + offsetX) * scale,
-                Y1 = (y1 + offsetY) * scale,
-                X2 = ((x1 + (line.Direction.X * line.Length)) + offsetX) * scale,
-                Y2 = ((y1 + (line.Direction.Y * line.Length)) + offsetY) * scale,
+                X1 = sourceX,
+                Y1 = sourceY,
+                X2 = destinationX,
+                Y2 = destinationY
+            } : new Line()
+            {
+                X1 = destinationX,
+                Y1 = destinationY,
+                X2 = sourceX,
+                Y2 = sourceY
             };
-
         }
         private static Rectangle GetRectangleFromBoundingBox(double scale, BoundingBoxXYZ box)
         {
             return new Rectangle()
             {
-                X = box.Min.X * scale,
-                Y = box.Min.Y * scale,
-                Width = (box.Max.X * scale) - (box.Min.X * scale),
-                Height = (box.Max.Y * scale) - (box.Min.Y * scale)
+                MinX = box.Min.X * scale,
+                MinY = box.Min.Y * scale,
+                MaxX = box.Max.X * scale,
+                MaxY = box.Max.Y * scale
             };
         }
     }

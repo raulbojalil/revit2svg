@@ -10,6 +10,7 @@ namespace Revit2Svg.Models
     {
         public int LevelIndex { get; set; }
         public string LevelName { get; set; }
+        public double LevelElevation { get; set; }
         public string Description { get; set; }
         public double Width { get; set; }
         public Line Line { get; set; }
