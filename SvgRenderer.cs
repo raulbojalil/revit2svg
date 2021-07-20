@@ -3,10 +3,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 using Rectangle = Revit2Svg.Models.Rectangle;
-using Wall = Revit2Svg.Models.Wall;
 using Line = Revit2Svg.Models.Line;
+using Point = Revit2Svg.Models.Point;
+using Element = Revit2Svg.Models.Element;
+using Wall = Revit2Svg.Models.Wall;
+using DoorOrWindow = Revit2Svg.Models.DoorOrWindow;
 using System.IO;
 
 namespace Revit2Svg
@@ -16,7 +18,7 @@ namespace Revit2Svg
         public static void DrawWalls(Document doc, double scale = 10, bool renderLines = true, 
             bool renderRects = true, bool renderFloorNames = true, double paddingBetweenLevels = 10)
         {
-            var walls = new List<Wall>();
+            var walls = new List<Element>();
 
             var offsetX = double.MaxValue;
             var offsetY = double.MaxValue;
@@ -69,7 +71,6 @@ namespace Revit2Svg
                             {
                                 LevelIndex = levels.IndexOf(level),
                                 LevelName = level.Name,
-                                LevelElevation = level.Elevation,
                                 Description = $"{wall.Name} ({actualLength} {units.TypeId})",
                                 Line = FixLine(scale, line, boundingBox),
                                 BoundingBox = GetRectangleFromBoundingBox(scale, boundingBox),
@@ -84,6 +85,18 @@ namespace Revit2Svg
                             var boundingBox = element.get_BoundingBox(null);
                             var location = doorOrWindow.Location as LocationPoint;
                             var rectangle = GetRectangleFromBoundingBox(scale, boundingBox);
+                            var level = levels.First(x => x.Id.IntegerValue == doorOrWindow.LevelId.IntegerValue);
+
+                            walls.Add(new DoorOrWindow()
+                            {
+                                IsWindow = doorOrWindow.Category.Id.IntegerValue == -2000014,
+                                LevelIndex = levels.IndexOf(level),
+                                LevelName = level.Name,
+                                Description = $"{doorOrWindow.Name}",
+                                Point = new Point() { X = location.Point.X * scale, Y = location.Point.Y * scale },
+                                BoundingBox = GetRectangleFromBoundingBox(scale, boundingBox)
+                            });
+
                             break;
                         }
                 }
@@ -100,18 +113,18 @@ namespace Revit2Svg
                         MaxY = double.MinValue
                     });
 
-                if(renderLines)
-                    levelBoundingBoxes[wall.LevelIndex].EnsureContainsLine(wall.Line);
+                if(renderLines && wall is Wall)
+                    levelBoundingBoxes[wall.LevelIndex].EnsureContainsLine((wall as Wall).Line);
 
                 if(renderRects)
                     levelBoundingBoxes[wall.LevelIndex].EnsureContainsRectangle(wall.BoundingBox);
 
-                if (renderLines)
+                if (renderLines && wall is Wall)
                 {
-                    if (wall.Line.X1 < offsetX) offsetX = wall.Line.X1;
-                    if (wall.Line.Y1 < offsetY) offsetY = wall.Line.Y1;
-                    if (wall.Line.X2 < offsetX) offsetX = wall.Line.X2;
-                    if (wall.Line.Y2 < offsetY) offsetY = wall.Line.Y2;
+                    if ((wall as Wall).Line.X1 < offsetX) offsetX = (wall as Wall).Line.X1;
+                    if ((wall as Wall).Line.Y1 < offsetY) offsetY = (wall as Wall).Line.Y1;
+                    if ((wall as Wall).Line.X2 < offsetX) offsetX = (wall as Wall).Line.X2;
+                    if ((wall as Wall).Line.Y2 < offsetY) offsetY = (wall as Wall).Line.Y2;
                 }
 
                 if (renderRects)
@@ -161,11 +174,26 @@ namespace Revit2Svg
 
                 currentLevelIndex = wall.LevelIndex;
 
-                var x1 = wall.Line.X1 + Math.Abs(offsetX);
-                var y1 = wall.Line.Y1 + Math.Abs(offsetY) + currentLevelOffset;
-                var x2 = wall.Line.X2 + Math.Abs(offsetX);
-                var y2 = wall.Line.Y2 + Math.Abs(offsetY) + currentLevelOffset;
-                var strokeWidth = wall.Width * scale;
+                if (renderLines && wall is Wall)
+                {
+                    var x1 = (wall as Wall).Line.X1 + Math.Abs(offsetX);
+                    var y1 = (wall as Wall).Line.Y1 + Math.Abs(offsetY) + currentLevelOffset;
+                    var x2 = (wall as Wall).Line.X2 + Math.Abs(offsetX);
+                    var y2 = (wall as Wall).Line.Y2 + Math.Abs(offsetY) + currentLevelOffset;
+                    var strokeWidth = (wall as Wall).Width * scale;
+
+                    svgBuilder.AppendLine(
+                        $"<line x1=\"{x1.Normalize()}\" y1=\"{y1.Normalize()}\" x2=\"{x2.Normalize()}\" y2=\"{y2.Normalize()}\" style=\"stroke:rgb(0,0,0);stroke-width:{strokeWidth}\" />");
+                }
+
+                if(wall is DoorOrWindow)
+                {
+                    var x = (wall as DoorOrWindow).Point.X + Math.Abs(offsetX);
+                    var y = (wall as DoorOrWindow).Point.Y + Math.Abs(offsetY) + currentLevelOffset;
+
+                    svgBuilder.AppendLine(
+                        $"<circle cx=\"{x.Normalize()}\" cy=\"{y.Normalize()}\" r=\"{scale}\"  style=\"fill:{((wall as DoorOrWindow).IsWindow ? "blue" : "green")}\" />");
+                }
 
                 var rectX = wall.BoundingBox.MinX + Math.Abs(offsetX);
                 var rectY = wall.BoundingBox.MinY + Math.Abs(offsetY) + currentLevelOffset;
@@ -177,12 +205,6 @@ namespace Revit2Svg
 
                 svgBuilder.AppendLine(
                     $"<!-- {wall.Description} -->");
-
-                if (renderLines)
-                {
-                    svgBuilder.AppendLine(
-                        $"<line x1=\"{x1.Normalize()}\" y1=\"{y1.Normalize()}\" x2=\"{x2.Normalize()}\" y2=\"{y2.Normalize()}\" style=\"stroke:rgb(0,0,0);stroke-width:{strokeWidth}\" />");
-                }
 
                 if (renderRects)
                 {
