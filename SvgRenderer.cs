@@ -38,28 +38,55 @@ namespace Revit2Svg
                 .OrderBy(x => x.LevelId.IntegerValue)
                 .ToList();
 
-            var wallsCollector = (new FilteredElementCollector(doc).OfClass(typeof(Autodesk.Revit.DB.Wall)));
+            var wallsCollector = (new FilteredElementCollector(doc)
+                .OfClass(typeof(Autodesk.Revit.DB.Wall)))
+                .ToElements();
+            
+            var doorsCollector = (new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_Doors)
+                    .OfClass(typeof(Autodesk.Revit.DB.FamilyInstance)))
+                    .ToElements();
 
-            foreach (Autodesk.Revit.DB.Wall wall in wallsCollector)
+            var windowsCollector = (new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_Windows)
+                   .OfClass(typeof(Autodesk.Revit.DB.FamilyInstance)))
+                   .ToElements();
+
+            var elements = wallsCollector.Concat(doorsCollector).Concat(windowsCollector);
+
+            foreach (var element in elements)
             {
-                var line = ((wall.Location as LocationCurve).Curve as Autodesk.Revit.DB.Line);
-                var boundingBox = wall.get_BoundingBox(null);
-
-                units = wall.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).GetUnitTypeId();
-                var length = wall.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).AsDouble();
-                var actualLength = UnitUtils.ConvertFromInternalUnits(length, units);
-                var level = levels.First(x => x.Id.IntegerValue == wall.LevelId.IntegerValue);
-
-                walls.Add(new Wall()
+                switch (element)
                 {
-                    LevelIndex = levels.IndexOf(level),
-                    LevelName = level.Name,
-                    LevelElevation = level.Elevation,
-                    Description = $"{wall.Name} ({actualLength} {units.TypeId})",
-                    Line = FixLine(scale, line, boundingBox),
-                    BoundingBox = GetRectangleFromBoundingBox(scale, boundingBox),
-                    Width = wall.Width,
-                });
+                    case Autodesk.Revit.DB.Wall wall when wall is Autodesk.Revit.DB.Wall:
+                        {
+                            var line = ((wall.Location as LocationCurve).Curve as Autodesk.Revit.DB.Line);
+                            var boundingBox = element.get_BoundingBox(null);
+                            units = wall.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).GetUnitTypeId();
+                            var length = wall.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).AsDouble();
+                            var actualLength = UnitUtils.ConvertFromInternalUnits(length, units);
+                            var level = levels.First(x => x.Id.IntegerValue == wall.LevelId.IntegerValue);
+
+                            walls.Add(new Wall()
+                            {
+                                LevelIndex = levels.IndexOf(level),
+                                LevelName = level.Name,
+                                LevelElevation = level.Elevation,
+                                Description = $"{wall.Name} ({actualLength} {units.TypeId})",
+                                Line = FixLine(scale, line, boundingBox),
+                                BoundingBox = GetRectangleFromBoundingBox(scale, boundingBox),
+                                Width = wall.Width,
+                            });
+
+                            break;
+                        }
+
+                    case Autodesk.Revit.DB.FamilyInstance doorOrWindow when doorOrWindow is Autodesk.Revit.DB.FamilyInstance:
+                        {
+                            var boundingBox = element.get_BoundingBox(null);
+                            var location = doorOrWindow.Location as LocationPoint;
+                            var rectangle = GetRectangleFromBoundingBox(scale, boundingBox);
+                            break;
+                        }
+                }
             }
 
             foreach (var wall in walls.OrderBy(x => x.LevelIndex))
@@ -93,7 +120,6 @@ namespace Revit2Svg
                     if (wall.BoundingBox.MinY < offsetY) offsetY = wall.BoundingBox.MinY;
                 }
             }
-
 
             foreach (var wall in walls.OrderBy(x => x.LevelIndex))
             {
