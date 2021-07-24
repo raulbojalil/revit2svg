@@ -9,13 +9,14 @@ using Point = Revit2Svg.Models.Point;
 using Element = Revit2Svg.Models.Element;
 using Wall = Revit2Svg.Models.Wall;
 using DoorOrWindow = Revit2Svg.Models.DoorOrWindow;
+using Level = Revit2Svg.Models.Level;
 using System.IO;
 
 namespace Revit2Svg
 {
     public class SvgRenderer
     {
-        public static void DrawWalls(Document doc, double scale = 10, bool renderLines = true, 
+        public static void Render(Document doc, double scale = 10, bool renderLines = true, 
             bool renderRects = true, bool renderFloorNames = true, double paddingBetweenLevels = 10)
         {
             var walls = new List<Element>();
@@ -34,9 +35,9 @@ namespace Revit2Svg
             var svgBuilder = new StringBuilder();
             var levelBoundingBoxes = new Dictionary<int, Rectangle>();
             
-            var levels = (new FilteredElementCollector(doc).OfClass(typeof(Level)))
+            var levels = (new FilteredElementCollector(doc).OfClass(typeof(Autodesk.Revit.DB.Level)))
                 .ToElements()
-                .Select(x => x as Level)
+                .Select(x => x as Autodesk.Revit.DB.Level)
                 .OrderBy(x => x.LevelId.IntegerValue)
                 .ToList();
 
@@ -71,7 +72,7 @@ namespace Revit2Svg
                             {
                                 LevelIndex = levels.IndexOf(level),
                                 LevelName = level.Name,
-                                Description = $"{wall.Name} ({actualLength} {units.TypeId})",
+                                Name = $"{wall.Name} ({actualLength} {units.TypeId})",
                                 Line = FixLine(scale, line, boundingBox),
                                 BoundingBox = GetRectangleFromBoundingBox(scale, boundingBox),
                                 Width = wall.Width,
@@ -92,7 +93,7 @@ namespace Revit2Svg
                                 IsWindow = doorOrWindow.Category.Id.IntegerValue == -2000014,
                                 LevelIndex = levels.IndexOf(level),
                                 LevelName = level.Name,
-                                Description = $"{doorOrWindow.Name}",
+                                Name = $"{doorOrWindow.Name}",
                                 Point = new Point() { X = location.Point.X * scale, Y = location.Point.Y * scale },
                                 BoundingBox = GetRectangleFromBoundingBox(scale, boundingBox)
                             });
@@ -116,7 +117,7 @@ namespace Revit2Svg
                 if(renderLines && wall is Wall)
                     levelBoundingBoxes[wall.LevelIndex].EnsureContainsLine((wall as Wall).Line);
 
-                if(renderRects)
+                if(renderRects && wall is Wall)
                     levelBoundingBoxes[wall.LevelIndex].EnsureContainsRectangle(wall.BoundingBox);
 
                 if (renderLines && wall is Wall)
@@ -157,7 +158,7 @@ namespace Revit2Svg
                             units);
 
                         svgBuilder.AppendLine(
-                            $"<text x=\"0\" y=\"{currentLevelOffset}\" fill=\"black\">{wall.LevelName} (Width: {Math.Round(floorWidth, 2)}, Height: {Math.Round(floorHeight, 2)} {units.TypeId})</text>");
+                            $"<text x=\"0\" y=\"{currentLevelOffset}\" fill=\"black\">{wall.LevelName}</text>");
 
                         currentLevelOffset += 10; //Padding around the text
                     }
@@ -204,7 +205,7 @@ namespace Revit2Svg
                 svgHeight = Math.Max(svgHeight, Convert.ToInt32(rectY + rectWidth));
 
                 svgBuilder.AppendLine(
-                    $"<!-- {wall.Description} -->");
+                    $"<!-- {wall.Name} -->");
 
                 if (renderRects)
                 {
@@ -216,6 +217,94 @@ namespace Revit2Svg
 
             var contents = $"<!DOCTYPE html><html><body><svg height=\"{svgHeight}\" width=\"{svgWidth}\">\r\n{svgBuilder}</svg></body></html>";
             File.WriteAllText(@".\svg_data.html", contents);
+        }
+
+        private static Level[] ExtractLevelsFromDocument(Document doc, int scale)
+        {
+            var levels = (new FilteredElementCollector(doc).OfClass(typeof(Autodesk.Revit.DB.Level)))
+               .ToElements()
+               .Select(x => x as Autodesk.Revit.DB.Level)
+               .OrderBy(x => x.LevelId.IntegerValue)
+               .ToList();
+
+            var wallsCollector = (new FilteredElementCollector(doc)
+                .OfClass(typeof(Autodesk.Revit.DB.Wall)))
+                .ToElements();
+
+            var doorsCollector = (new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_Doors)
+                    .OfClass(typeof(Autodesk.Revit.DB.FamilyInstance)))
+                    .ToElements();
+
+            var windowsCollector = (new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_Windows)
+                   .OfClass(typeof(Autodesk.Revit.DB.FamilyInstance)))
+                   .ToElements();
+
+            var elements = wallsCollector.Concat(doorsCollector).Concat(windowsCollector);
+
+            var extractedLevels = levels.Select(x => new Level() { 
+                Name = x.Name, Elevation = x.Elevation, BoundingBox = new Rectangle(), 
+                Elements = new List<Element>() }).ToArray();
+
+            for (var i = 0; i < extractedLevels.Length - 1; i++) 
+                extractedLevels[i].Height = extractedLevels[i + 1].Elevation - extractedLevels[i].Elevation;
+
+            foreach (var element in elements)
+            {
+                switch (element)
+                {
+                    case Autodesk.Revit.DB.Wall wall when wall is Autodesk.Revit.DB.Wall:
+                        {
+                            var line = ((wall.Location as LocationCurve).Curve as Autodesk.Revit.DB.Line);
+                            var boundingBox = element.get_BoundingBox(null);
+                            var units = wall.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).GetUnitTypeId();
+                            var length = wall.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).AsDouble();
+                            var actualLength = UnitUtils.ConvertFromInternalUnits(length, units);
+                            var level = levels.First(x => x.Id.IntegerValue == wall.LevelId.IntegerValue);
+                            var levelIndex = levels.IndexOf(level);
+
+                            var wallElement = new Wall()
+                            {
+                                LevelIndex = levelIndex,
+                                LevelName = level.Name,
+                                Name = $"{wall.Name} ({actualLength} {units.TypeId})",
+                                Line = FixLine(scale, line, boundingBox),
+                                BoundingBox = GetRectangleFromBoundingBox(scale, boundingBox),
+                                Width = wall.Width,
+                            };
+
+                            extractedLevels[levelIndex].BoundingBox.EnsureContainsRectangle(wallElement.BoundingBox);
+                            extractedLevels[levelIndex].Elements.Add(wallElement);
+
+                            break;
+                        }
+
+                    case Autodesk.Revit.DB.FamilyInstance doorOrWindow when doorOrWindow is Autodesk.Revit.DB.FamilyInstance:
+                        {
+                            var boundingBox = element.get_BoundingBox(null);
+                            var location = doorOrWindow.Location as LocationPoint;
+                            var rectangle = GetRectangleFromBoundingBox(scale, boundingBox);
+                            var level = levels.First(x => x.Id.IntegerValue == doorOrWindow.LevelId.IntegerValue);
+                            var levelIndex = levels.IndexOf(level);
+
+                            var doorOrWindowElement = new DoorOrWindow()
+                            {
+                                IsWindow = doorOrWindow.Category.Id.IntegerValue == -2000014,
+                                LevelIndex = levels.IndexOf(level),
+                                LevelName = level.Name,
+                                Name = $"{doorOrWindow.Name}",
+                                Point = new Point() { X = location.Point.X * scale, Y = location.Point.Y * scale },
+                                BoundingBox = GetRectangleFromBoundingBox(scale, boundingBox)
+                            };
+
+                            extractedLevels[levelIndex].BoundingBox.EnsureContainsRectangle(doorOrWindowElement.BoundingBox);
+                            extractedLevels[levelIndex].Elements.Add(doorOrWindowElement);
+
+                            break;
+                        }
+                }
+            }
+
+            return extractedLevels.ToArray();
         }
 
         private static Line FixLine(double scale, Autodesk.Revit.DB.Line line, BoundingBoxXYZ boundingBox)

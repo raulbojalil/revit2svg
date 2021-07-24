@@ -40,7 +40,7 @@ namespace Revit2Svg
             using (var tx = new Transaction(doc))
             {
                 tx.Start("Export to Svg");
-                SvgRenderer.DrawWalls(doc);
+                SvgRenderer.Render(doc);
                 tx.RollBack();
             }
         }

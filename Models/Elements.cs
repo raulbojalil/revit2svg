@@ -1,17 +1,10 @@
-﻿using Autodesk.Revit.DB;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Revit2Svg.Models
+﻿namespace Revit2Svg.Models
 {
     public class Element
     {
         public int LevelIndex { get; set; }
         public string LevelName { get; set; }
-        public string Description { get; set; }
+        public string Name { get; set; }
         public Rectangle BoundingBox { get; set; }
     }
 
