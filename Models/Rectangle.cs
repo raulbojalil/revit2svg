@@ -9,7 +9,8 @@ namespace Revit2Svg.Models
         public double MaxX { get; set; }
         public double MaxY { get; set; }
 
-        public double Height { 
+        public double Height 
+        { 
             get
             {
                 return MaxY - MinY;
