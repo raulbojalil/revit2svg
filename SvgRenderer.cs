@@ -17,7 +17,7 @@ namespace Revit2Svg
 {
     public class SvgRenderer
     {
-        public void Render(Document doc, double scale = 1, bool renderLines = true, 
+        public void Render(Document doc, double scale = 10, bool renderLines = true, 
             bool renderRects = true, bool renderFloorNames = true, double paddingBetweenLevels = 10)
         {
             var levels = ExtractLevelsFromDocument(doc);
@@ -30,8 +30,8 @@ namespace Revit2Svg
 
             foreach (var level in levels)
             {
-                var offsetX = level.BoundingBox.MinX * -1;
-                var offsetY = level.BoundingBox.MinY * -1;
+                var offsetX = level.BoundingBox.MinX * scale * -1;
+                var offsetY = level.BoundingBox.MinY * scale * -1;
 
                 if (renderFloorNames)
                 {
@@ -45,10 +45,10 @@ namespace Revit2Svg
 
                 if(renderRects)
                 {
-                    var rectX = level.BoundingBox.MinX + Math.Abs(offsetX);
-                    var rectY = level.BoundingBox.MinY + Math.Abs(offsetY) + drawingY;
-                    var rectWidth = level.BoundingBox.Width;
-                    var rectHeight = level.BoundingBox.Height;
+                    var rectX = (level.InnerBoundingBox.MinX * scale) + Math.Abs(offsetX);
+                    var rectY = (level.InnerBoundingBox.MinY * scale) + Math.Abs(offsetY) + drawingY;
+                    var rectWidth = level.InnerBoundingBox.Width * scale;
+                    var rectHeight = level.InnerBoundingBox.Height * scale;
 
                     svgWidth = Math.Max(svgWidth, rectWidth);
                     svgHeight = Math.Max(svgHeight, rectHeight);
@@ -62,11 +62,11 @@ namespace Revit2Svg
                 {
                     if (renderLines && element is Wall)
                     {
-                        var x1 = (element as Wall).Line.X1 + Math.Abs(offsetX);
-                        var y1 = (element as Wall).Line.Y1 + Math.Abs(offsetY) + drawingY;
-                        var x2 = (element as Wall).Line.X2 + Math.Abs(offsetX);
-                        var y2 = (element as Wall).Line.Y2 + Math.Abs(offsetY) + drawingY;
-                        var strokeWidth = (element as Wall).Width;
+                        var x1 = ((element as Wall).Line.X1 * scale) + Math.Abs(offsetX);
+                        var y1 = ((element as Wall).Line.Y1 * scale) + Math.Abs(offsetY) + drawingY;
+                        var x2 = ((element as Wall).Line.X2 * scale) + Math.Abs(offsetX);
+                        var y2 = ((element as Wall).Line.Y2 * scale) + Math.Abs(offsetY) + drawingY;
+                        var strokeWidth = (element as Wall).Width * scale;
 
                         svgWidth = Math.Max(svgWidth, x2);
                         svgHeight = Math.Max(svgHeight, y2);
@@ -77,10 +77,10 @@ namespace Revit2Svg
 
                     if (renderRects && element is Wall)
                     {
-                        var rectX = (element as Wall).BoundingBox.MinX + Math.Abs(offsetX);
-                        var rectY = (element as Wall).BoundingBox.MinY + Math.Abs(offsetY) + drawingY;
-                        var rectWidth = (element as Wall).BoundingBox.Width;
-                        var rectHeight = (element as Wall).BoundingBox.Height;
+                        var rectX = ((element as Wall).BoundingBox.MinX * scale) + Math.Abs(offsetX);
+                        var rectY = ((element as Wall).BoundingBox.MinY * scale) + Math.Abs(offsetY) + drawingY;
+                        var rectWidth = (element as Wall).BoundingBox.Width * scale;
+                        var rectHeight = (element as Wall).BoundingBox.Height * scale;
 
                         svgWidth = Math.Max(svgWidth, rectWidth);
                         svgHeight = Math.Max(svgHeight, rectHeight);
@@ -91,15 +91,15 @@ namespace Revit2Svg
 
                     if (element is DoorOrWindow)
                     {
-                        var x = (element as DoorOrWindow).Point.X + Math.Abs(offsetX);
-                        var y = (element as DoorOrWindow).Point.Y + Math.Abs(offsetY) + drawingY;
+                        var x = ((element as DoorOrWindow).Point.X * scale) + Math.Abs(offsetX);
+                        var y = ((element as DoorOrWindow).Point.Y * scale) + Math.Abs(offsetY) + drawingY;
 
                         svgBuilder.AppendLine(
                             $"<circle cx=\"{x.Normalize()}\" cy=\"{y.Normalize()}\" r=\"{scale}\"  style=\"fill:{((element as DoorOrWindow).IsWindow ? "blue" : "green")}\" />");
                     }
                 }
 
-                drawingY += level.BoundingBox.Height;
+                drawingY += (level.BoundingBox.Height * scale);
             }
 
             File.WriteAllText(@".\svg_data.html", $"<!DOCTYPE html><html><body><svg height=\"{svgHeight}\" width=\"{svgWidth}\">\r\n{svgBuilder}</svg></body></html>");
