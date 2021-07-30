@@ -51,6 +51,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AddIn.cs" />
+    <Compile Include="Models\Document.cs" />
     <Compile Include="Models\Point.cs" />
     <Compile Include="Models\Rectangle.cs" />
     <Compile Include="Models\Line.cs" />

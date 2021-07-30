@@ -10,6 +10,7 @@ using Element = Revit2Svg.Models.Element;
 using Wall = Revit2Svg.Models.Wall;
 using DoorOrWindow = Revit2Svg.Models.DoorOrWindow;
 using Level = Revit2Svg.Models.Level;
+using Document = Revit2Svg.Models.Document;
 using System.IO;
 using Newtonsoft.Json;
 
@@ -17,10 +18,10 @@ namespace Revit2Svg
 {
     public class SvgRenderer
     {
-        public void Render(Document doc, double scale = 10, bool renderLines = true, 
+        public void Render(Autodesk.Revit.DB.Document doc, double scale = 10, bool renderLines = true, 
             bool renderRects = true, bool renderFloorNames = true, double paddingBetweenLevels = 10)
         {
-            var levels = ExtractLevelsFromDocument(doc);
+            var document = ExtractDataFromDocument(doc);
 
             double drawingY = 0;
             var svgBuilder = new StringBuilder();
@@ -28,7 +29,7 @@ namespace Revit2Svg
             double svgWidth = 0;
             double svgHeight = 0;
 
-            foreach (var level in levels)
+            foreach (var level in document.Levels)
             {
                 var offsetX = level.BoundingBox.MinX * scale * -1;
                 var offsetY = level.BoundingBox.MinY * scale * -1;
@@ -56,7 +57,6 @@ namespace Revit2Svg
                     svgBuilder.AppendLine(
                             $"<rect x=\"{rectX.Normalize()}\" y=\"{rectY.Normalize()}\" width=\"{rectWidth.Normalize()}\" height=\"{rectHeight.Normalize()}\" style=\"stroke:rgb(255,255,0);fill: none;stroke-width:1\" />");
                 }
-
 
                 foreach (var element in level.Elements)
                 {
@@ -103,15 +103,27 @@ namespace Revit2Svg
             }
 
             File.WriteAllText(@".\svg_data.html", $"<!DOCTYPE html><html><body><svg height=\"{svgHeight}\" width=\"{svgWidth}\">\r\n{svgBuilder}</svg></body></html>");
-            File.WriteAllText(@".\metadata.json", JsonConvert.SerializeObject(levels));
+            File.WriteAllText(@".\metadata.json", JsonConvert.SerializeObject(document));
         }
 
-        private Level[] ExtractLevelsFromDocument(Document doc)
+        private Document ExtractDataFromDocument(Autodesk.Revit.DB.Document doc)
         {
+            var document = new Document()
+            {
+                Title = doc.Title,
+                Latitude = doc.SiteLocation.Latitude / (Math.PI / 180),
+                Longitude = doc.SiteLocation.Longitude / (Math.PI / 180),
+                TimeZone = doc.SiteLocation.TimeZone,
+                Units = doc.DisplayUnitSystem.ToString(),
+                AngleFromTrueNorth = doc.ActiveProjectLocation.GetProjectPosition(XYZ.Zero).Angle,
+                Levels = new List<Level>()
+            };
+
+
             var levels = (new FilteredElementCollector(doc).OfClass(typeof(Autodesk.Revit.DB.Level)))
                .ToElements()
                .Select(x => x as Autodesk.Revit.DB.Level)
-               .OrderBy(x => x.LevelId.IntegerValue)
+               .OrderBy(x => x.Elevation)
                .ToList();
 
             var wallsCollector = (new FilteredElementCollector(doc)
@@ -128,18 +140,21 @@ namespace Revit2Svg
 
             var elements = wallsCollector.Concat(doorsCollector).Concat(windowsCollector);
 
-            var extractedLevels = levels.Select(x => new Level() { 
-                Name = x.Name, Elevation = x.Elevation, 
-                InnerBoundingBox = new Rectangle() { MaxX = double.MinValue, MinX = double.MaxValue, MaxY = double.MinValue, MinY = double.MaxValue, },
-                BoundingBox = new Rectangle() { MaxX = double.MinValue, MinX = double.MaxValue, MaxY = double.MinValue, MinY = double.MaxValue, },
-                Elements = new List<Element>() }).ToArray();
-
-            for (var i = 0; i < extractedLevels.Length - 1; i++)
+            document.Levels = levels.Select(x => new Level()
             {
-                var height = extractedLevels[i + 1].Elevation - extractedLevels[i].Elevation;
-                extractedLevels[i].Height = height;
-                extractedLevels[i].HeightM = ConvertToMeters(height);
-                extractedLevels[i].HeightFt = ConvertToFeet(height);
+                Name = x.Name,
+                Elevation = x.Elevation,
+                InnerBoundingBox = Rectangle.MinMax,
+                BoundingBox = Rectangle.MinMax,
+                Elements = new List<Element>()
+            }).ToList();
+
+            for (var i = 0; i < document.Levels.Count - 1; i++)
+            {
+                var height = document.Levels[i + 1].Elevation - document.Levels[i].Elevation;
+                document.Levels[i].Height = height;
+                document.Levels[i].HeightM = TryConvertToMeters(height);
+                document.Levels[i].HeightFt = TryConvertToFeet(height);
             }
 
             foreach (var element in elements)
@@ -155,7 +170,7 @@ namespace Revit2Svg
                             var actualLength = UnitUtils.ConvertFromInternalUnits(length, units);
                             var level = levels.First(x => x.Id.IntegerValue == wall.LevelId.IntegerValue);
                             var levelIndex = levels.IndexOf(level);
-
+                            
                             var wallElement = new Wall()
                             {
                                 Name = $"{wall.Name} ({actualLength} {units.TypeId})",
@@ -164,10 +179,10 @@ namespace Revit2Svg
                                 Width = wall.Width,
                             };
 
-                            extractedLevels[levelIndex].InnerBoundingBox.EnsureContainsRectangle(wallElement.BoundingBox);
+                            document.Levels[levelIndex].InnerBoundingBox.EnsureContainsRectangle(wallElement.BoundingBox);
 
-                            extractedLevels[levelIndex].BoundingBox.EnsureContainsRectangle(wallElement.BoundingBox);
-                            extractedLevels[levelIndex].Elements.Add(wallElement);
+                            document.Levels[levelIndex].BoundingBox.EnsureContainsRectangle(wallElement.BoundingBox);
+                            document.Levels[levelIndex].Elements.Add(wallElement);
 
                             break;
                         }
@@ -188,21 +203,27 @@ namespace Revit2Svg
                                 BoundingBox = GetRectangleFromBoundingBox(boundingBox)
                             };
 
-                            extractedLevels[levelIndex].BoundingBox.EnsureContainsRectangle(doorOrWindowElement.BoundingBox);
-                            extractedLevels[levelIndex].Elements.Add(doorOrWindowElement);
+                            document.Levels[levelIndex].BoundingBox.EnsureContainsRectangle(doorOrWindowElement.BoundingBox);
+                            document.Levels[levelIndex].Elements.Add(doorOrWindowElement);
 
                             break;
                         }
                 }
             }
 
-            foreach(var level in extractedLevels)
+            foreach(var level in document.Levels)
             {
-                level.WidthM = ConvertToMeters(level.InnerBoundingBox.Width);
-                level.WidthFt = ConvertToFeet(level.InnerBoundingBox.Width);
+                if (level.Elements.Count == 0)
+                {
+                    level.InnerBoundingBox = Rectangle.Zero;
+                    level.BoundingBox = Rectangle.Zero;
+                }
+
+                level.WidthM = TryConvertToMeters(level.InnerBoundingBox.Width);
+                level.WidthFt = TryConvertToFeet(level.InnerBoundingBox.Width);
             }
 
-            return extractedLevels.ToArray();
+            return document;
         }
 
         private Line FixLine(Autodesk.Revit.DB.Line line, BoundingBoxXYZ boundingBox)
@@ -254,7 +275,7 @@ namespace Revit2Svg
             };
         }
 
-        private double ConvertToMeters(double distance)
+        private double TryConvertToMeters(double distance)
         {
             try
             {
@@ -266,7 +287,7 @@ namespace Revit2Svg
             }
         }
 
-        private double ConvertToFeet(double distance)
+        private double TryConvertToFeet(double distance)
         {
             try
             {

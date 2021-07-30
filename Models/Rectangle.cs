@@ -47,5 +47,22 @@ namespace Revit2Svg.Models
             MaxX = Math.Max(MaxX, boundingBox.MaxX);
             MaxY = Math.Max(MaxY, boundingBox.MaxY);
         }
+
+        public static Rectangle MinMax
+        {
+            get
+            {
+                return new Rectangle() { MaxX = double.MinValue, MinX = double.MaxValue, MaxY = double.MinValue, MinY = double.MaxValue };
+            }
+        }
+
+        public static Rectangle Zero
+        {
+            get
+            {
+                return new Rectangle() { MaxX = 0, MinX = 0, MaxY = 0, MinY = 0 };
+            }
+            
+        }
     }
 }
