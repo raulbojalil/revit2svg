@@ -2,23 +2,27 @@
 
 namespace Revit2Svg.Models
 {
+    public enum ElementType
+    {
+        Level = 0,
+        Wall = 1,
+        Door = 2,
+        Window = 3
+    }
+
     public class Element
     {
         public string Name { get; set; }
         public Rectangle BoundingBox { get; set; }
+        public ElementType Type { get; set; }
     }
 
     public class Level : Element
     {
         /// <summary>
-        /// Elevation of the level
+        /// Elevation of the level in decimal feet
         /// </summary>
         public double Elevation { get; set; }
-
-        /// <summary>
-        /// Floor height in internal units
-        /// </summary>
-        public double Height { get; set; }
 
         /// <summary>
         /// Floor height in meters
@@ -64,13 +68,8 @@ namespace Revit2Svg.Models
         public Line Line { get; set; }
     }
 
-    public class DoorOrWindow : Element
+    public class OtherElement : Element
     {
-        /// <summary>
-        /// Whether this element is a window or a door
-        /// </summary>
-        public bool IsWindow { get; set; }
-
         /// <summary>
         /// Location point
         /// </summary>

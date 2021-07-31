@@ -8,9 +8,10 @@ using Line = Revit2Svg.Models.Line;
 using Point = Revit2Svg.Models.Point;
 using Element = Revit2Svg.Models.Element;
 using Wall = Revit2Svg.Models.Wall;
-using DoorOrWindow = Revit2Svg.Models.DoorOrWindow;
+using OtherElement = Revit2Svg.Models.OtherElement;
 using Level = Revit2Svg.Models.Level;
 using Document = Revit2Svg.Models.Document;
+using ElementType = Revit2Svg.Models.ElementType;
 using System.IO;
 using Newtonsoft.Json;
 
@@ -19,7 +20,7 @@ namespace Revit2Svg
     public class SvgRenderer
     {
         public void Render(Autodesk.Revit.DB.Document doc, double scale = 10, bool renderLines = true, 
-            bool renderRects = true, bool renderFloorNames = true, double paddingBetweenLevels = 10)
+            bool renderRects = true, bool renderFloorNames = true)
         {
             var document = ExtractDataFromDocument(doc);
 
@@ -56,7 +57,7 @@ namespace Revit2Svg
                             $"<rect x=\"{levelRectX.Normalize()}\" y=\"{levelRectY.Normalize()}\" width=\"{levelRectWidth.Normalize()}\" height=\"{levelRectHeight.Normalize()}\" style=\"stroke:rgb(255,255,0);fill: none;stroke-width:1\" />");
                 }
 
-                foreach (var element in level.Elements)
+                foreach (var element in level.Elements.OrderBy(x => x.Type))
                 {
                     if (renderLines && element is Wall)
                     {
@@ -66,45 +67,42 @@ namespace Revit2Svg
                         var y2 = ((element as Wall).Line.Y2 * scale) + Math.Abs(offsetY) + drawingY;
                         var strokeWidth = (element as Wall).Width * scale;
 
-
                         //Correcting the Y axis
                         y1 = levelRectY - (y1 - levelRectY) + levelRectHeight;
                         y2 = levelRectY - (y2 - levelRectY) + levelRectHeight;
 
                         svgWidth = Math.Max(svgWidth, x2);
-                        svgHeight = Math.Max(svgHeight, y2);
 
                         svgBuilder.AppendLine(
                             $"<line x1=\"{x1.Normalize()}\" y1=\"{y1.Normalize()}\" x2=\"{x2.Normalize()}\" y2=\"{y2.Normalize()}\" style=\"stroke:rgb(0,0,0);stroke-width:{strokeWidth}\" />");
                     }
 
-                    if (renderRects && element is Wall)
+                    if (renderRects)
                     {
-                        var rectX = ((element as Wall).BoundingBox.MinX * scale) + Math.Abs(offsetX);
-                        var rectY = ((element as Wall).BoundingBox.MinY * scale) + Math.Abs(offsetY) + drawingY;
-                        var rectWidth = (element as Wall).BoundingBox.Width * scale;
-                        var rectHeight = (element as Wall).BoundingBox.Height * scale;
+                        var rectX = (element.BoundingBox.MinX * scale) + Math.Abs(offsetX);
+                        var rectY = (element.BoundingBox.MinY * scale) + Math.Abs(offsetY) + drawingY;
+                        var rectWidth = element.BoundingBox.Width * scale;
+                        var rectHeight = element.BoundingBox.Height * scale;
 
                         //Correcting the Y axis
                         rectY = levelRectY - (rectY - levelRectY) - rectHeight + levelRectHeight;
 
-                        svgWidth = Math.Max(svgWidth, rectWidth);
-                        svgHeight = Math.Max(svgHeight, rectHeight);
+                        svgWidth = Math.Max(svgWidth, rectX + rectWidth);
 
                         svgBuilder.AppendLine(
                                 $"<rect x=\"{rectX.Normalize()}\" y=\"{rectY.Normalize()}\" width=\"{rectWidth.Normalize()}\" height=\"{rectHeight.Normalize()}\" style=\"stroke:rgb(255,0,0);fill: none;stroke-width:1\" />");
                     }
 
-                    if (element is DoorOrWindow)
+                    if (element is OtherElement)
                     {
-                        var x = ((element as DoorOrWindow).Point.X * scale) + Math.Abs(offsetX);
-                        var y = ((element as DoorOrWindow).Point.Y * scale) + Math.Abs(offsetY) + drawingY;
+                        var x = ((element as OtherElement).Point.X * scale) + Math.Abs(offsetX);
+                        var y = ((element as OtherElement).Point.Y * scale) + Math.Abs(offsetY) + drawingY;
 
                         //Correcting the Y axis
                         y = levelRectY - (y - levelRectY) + levelRectHeight;
 
                         svgBuilder.AppendLine(
-                            $"<circle cx=\"{x.Normalize()}\" cy=\"{y.Normalize()}\" r=\"{scale}\"  style=\"fill:{((element as DoorOrWindow).IsWindow ? "blue" : "green")}\" />");
+                            $"<circle cx=\"{x.Normalize()}\" cy=\"{y.Normalize()}\" r=\"{scale}\"  style=\"fill:{((element as OtherElement).Type == ElementType.Window ? "blue" : "green")}\" />");
                     }
                 }
 
@@ -152,6 +150,7 @@ namespace Revit2Svg
 
             document.Levels = levels.Select(x => new Level()
             {
+                Type = ElementType.Level,
                 Name = x.Name,
                 Elevation = x.Elevation,
                 InnerBoundingBox = Rectangle.MinMax,
@@ -162,9 +161,8 @@ namespace Revit2Svg
             for (var i = 0; i < document.Levels.Count - 1; i++)
             {
                 var height = document.Levels[i + 1].Elevation - document.Levels[i].Elevation;
-                document.Levels[i].Height = height;
                 document.Levels[i].HeightM = TryConvertToMeters(height);
-                document.Levels[i].HeightFt = TryConvertToFeet(height);
+                document.Levels[i].HeightFt = height;
             }
 
             foreach (var element in elements)
@@ -183,6 +181,7 @@ namespace Revit2Svg
                             
                             var wallElement = new Wall()
                             {
+                                Type = ElementType.Wall,
                                 Name = $"{wall.Name} ({actualLength} {units.TypeId})",
                                 Line = FixLine(line, boundingBox),
                                 BoundingBox = GetRectangleFromBoundingBox(boundingBox),
@@ -197,18 +196,18 @@ namespace Revit2Svg
                             break;
                         }
 
-                    case Autodesk.Revit.DB.FamilyInstance doorOrWindow when doorOrWindow is Autodesk.Revit.DB.FamilyInstance:
+                    case Autodesk.Revit.DB.FamilyInstance familyInstance when familyInstance is Autodesk.Revit.DB.FamilyInstance:
                         {
                             var boundingBox = element.get_BoundingBox(null);
-                            var location = doorOrWindow.Location as LocationPoint;
+                            var location = familyInstance.Location as LocationPoint;
                             var rectangle = GetRectangleFromBoundingBox(boundingBox);
-                            var level = levels.First(x => x.Id.IntegerValue == doorOrWindow.LevelId.IntegerValue);
+                            var level = levels.First(x => x.Id.IntegerValue == familyInstance.LevelId.IntegerValue);
                             var levelIndex = levels.IndexOf(level);
 
-                            var doorOrWindowElement = new DoorOrWindow()
+                            var doorOrWindowElement = new OtherElement()
                             {
-                                IsWindow = doorOrWindow.Category.Id.IntegerValue == -2000014,
-                                Name = $"{doorOrWindow.Name}",
+                                Type = familyInstance.Category.Id.IntegerValue == -2000014 ? ElementType.Window : ElementType.Door,
+                                Name = $"{familyInstance.Name}",
                                 Point = new Point() { X = location.Point.X, Y = location.Point.Y },
                                 BoundingBox = GetRectangleFromBoundingBox(boundingBox)
                             };
