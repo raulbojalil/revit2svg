@@ -44,18 +44,16 @@ namespace Revit2Svg
                     drawingY += 15; //Padding around the text
                 }
 
-                if(renderRects)
+                var levelRectX = (level.InnerBoundingBox.MinX * scale) + Math.Abs(offsetX);
+                var levelRectY = (level.InnerBoundingBox.MinY * scale) + Math.Abs(offsetY) + drawingY;
+                var levelRectHeight = level.InnerBoundingBox.Height * scale;
+                var levelRectWidth = level.InnerBoundingBox.Width * scale;
+
+                if (renderRects)
                 {
-                    var rectX = (level.InnerBoundingBox.MinX * scale) + Math.Abs(offsetX);
-                    var rectY = (level.InnerBoundingBox.MinY * scale) + Math.Abs(offsetY) + drawingY;
-                    var rectWidth = level.InnerBoundingBox.Width * scale;
-                    var rectHeight = level.InnerBoundingBox.Height * scale;
-
-                    svgWidth = Math.Max(svgWidth, rectWidth);
-                    svgHeight = Math.Max(svgHeight, rectHeight);
-
+                    svgWidth = Math.Max(svgWidth, levelRectWidth);
                     svgBuilder.AppendLine(
-                            $"<rect x=\"{rectX.Normalize()}\" y=\"{rectY.Normalize()}\" width=\"{rectWidth.Normalize()}\" height=\"{rectHeight.Normalize()}\" style=\"stroke:rgb(255,255,0);fill: none;stroke-width:1\" />");
+                            $"<rect x=\"{levelRectX.Normalize()}\" y=\"{levelRectY.Normalize()}\" width=\"{levelRectWidth.Normalize()}\" height=\"{levelRectHeight.Normalize()}\" style=\"stroke:rgb(255,255,0);fill: none;stroke-width:1\" />");
                 }
 
                 foreach (var element in level.Elements)
@@ -67,6 +65,11 @@ namespace Revit2Svg
                         var x2 = ((element as Wall).Line.X2 * scale) + Math.Abs(offsetX);
                         var y2 = ((element as Wall).Line.Y2 * scale) + Math.Abs(offsetY) + drawingY;
                         var strokeWidth = (element as Wall).Width * scale;
+
+
+                        //Correcting the Y axis
+                        y1 = levelRectY - (y1 - levelRectY) + levelRectHeight;
+                        y2 = levelRectY - (y2 - levelRectY) + levelRectHeight;
 
                         svgWidth = Math.Max(svgWidth, x2);
                         svgHeight = Math.Max(svgHeight, y2);
@@ -82,6 +85,9 @@ namespace Revit2Svg
                         var rectWidth = (element as Wall).BoundingBox.Width * scale;
                         var rectHeight = (element as Wall).BoundingBox.Height * scale;
 
+                        //Correcting the Y axis
+                        rectY = levelRectY - (rectY - levelRectY) - rectHeight + levelRectHeight;
+
                         svgWidth = Math.Max(svgWidth, rectWidth);
                         svgHeight = Math.Max(svgHeight, rectHeight);
 
@@ -94,12 +100,16 @@ namespace Revit2Svg
                         var x = ((element as DoorOrWindow).Point.X * scale) + Math.Abs(offsetX);
                         var y = ((element as DoorOrWindow).Point.Y * scale) + Math.Abs(offsetY) + drawingY;
 
+                        //Correcting the Y axis
+                        y = levelRectY - (y - levelRectY) + levelRectHeight;
+
                         svgBuilder.AppendLine(
                             $"<circle cx=\"{x.Normalize()}\" cy=\"{y.Normalize()}\" r=\"{scale}\"  style=\"fill:{((element as DoorOrWindow).IsWindow ? "blue" : "green")}\" />");
                     }
                 }
 
                 drawingY += (level.BoundingBox.Height * scale);
+                svgHeight = drawingY;
             }
 
             File.WriteAllText(@".\svg_data.html", $"<!DOCTYPE html><html><body><svg height=\"{svgHeight}\" width=\"{svgWidth}\">\r\n{svgBuilder}</svg></body></html>");
@@ -256,7 +266,8 @@ namespace Revit2Svg
                 Y1 = sourceY,
                 X2 = destinationX,
                 Y2 = destinationY
-            } : new Line()
+            } 
+            : new Line()
             {
                 X1 = destinationX,
                 Y1 = destinationY,
