@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using Autodesk.Revit.DB;
+using System.Collections.Generic;
 
 namespace Revit2Svg.Models
 {
@@ -66,6 +67,18 @@ namespace Revit2Svg.Models
         /// Location line
         /// </summary>
         public Line Line { get; set; }
+
+        public string WallTypeFamilyName { get; set; }
+
+        public string MaterialName { get; set; }
+
+        public ThermalProperties ThermalProperties { get; set; }
+
+        public override string ToString()
+        {
+            return $"{Name} (Type: {WallTypeFamilyName}, Material: {MaterialName})";
+        }
+
     }
 
     public class OtherElement : Element
@@ -74,5 +87,23 @@ namespace Revit2Svg.Models
         /// Location point
         /// </summary>
         public Point Point { get; set; }
+
+        /// <summary>
+        /// Vector describing the orientation
+        /// </summary>
+        public Vector Orientation { get; set; }
+
+        /// <summary>
+        /// Vector describing the hand orientation
+        /// </summary>
+        public Vector HandOrientation { get; set; }
+
+        public string FamilyName { get; set; }
+        public FamilyPlacementType FamilyPlacementType { get; set; }
+
+        public override string ToString()
+        {
+            return $"{Name} (Family: {FamilyName}, PlacementType: {FamilyPlacementType})";
+        }
     }
 }

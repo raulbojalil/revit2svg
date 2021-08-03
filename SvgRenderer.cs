@@ -11,9 +11,11 @@ using Wall = Revit2Svg.Models.Wall;
 using OtherElement = Revit2Svg.Models.OtherElement;
 using Level = Revit2Svg.Models.Level;
 using Document = Revit2Svg.Models.Document;
+using Vector = Revit2Svg.Models.Vector;
 using ElementType = Revit2Svg.Models.ElementType;
 using System.IO;
 using Newtonsoft.Json;
+
 
 namespace Revit2Svg
 {
@@ -90,7 +92,19 @@ namespace Revit2Svg
                         svgWidth = Math.Max(svgWidth, rectX + rectWidth);
 
                         svgBuilder.AppendLine(
+                                $"<!-- {element} -->");
+
+                        svgBuilder.AppendLine(
                                 $"<rect x=\"{rectX.Normalize()}\" y=\"{rectY.Normalize()}\" width=\"{rectWidth.Normalize()}\" height=\"{rectHeight.Normalize()}\" style=\"stroke:rgb(255,0,0);fill: none;stroke-width:1\" />");
+
+                        
+                        if (element.Type == ElementType.Door) {
+                            svgBuilder.AppendLine(DrawDoor(rectX, rectY, rectWidth, rectHeight, 
+                                (element as OtherElement).FamilyName,
+                                (element as OtherElement).Orientation,
+                                (element as OtherElement).HandOrientation));
+                        }
+
                     }
 
                     if (element is OtherElement)
@@ -126,7 +140,6 @@ namespace Revit2Svg
                 AngleFromTrueNorth = doc.ActiveProjectLocation.GetProjectPosition(XYZ.Zero).Angle,
                 Levels = new List<Level>()
             };
-
 
             var levels = (new FilteredElementCollector(doc).OfClass(typeof(Autodesk.Revit.DB.Level)))
                .ToElements()
@@ -186,6 +199,9 @@ namespace Revit2Svg
                                 Line = FixLine(line, boundingBox),
                                 BoundingBox = GetRectangleFromBoundingBox(boundingBox),
                                 Width = wall.Width,
+                                WallTypeFamilyName = wall.WallType.FamilyName,
+                                MaterialName = wall.WallType.Category.Material.Name,
+                                ThermalProperties = wall.WallType.ThermalProperties
                             };
 
                             document.Levels[levelIndex].InnerBoundingBox.EnsureContainsRectangle(wallElement.BoundingBox);
@@ -206,9 +222,15 @@ namespace Revit2Svg
 
                             var doorOrWindowElement = new OtherElement()
                             {
+                                FamilyPlacementType = familyInstance.Symbol.Family.FamilyPlacementType,
+                                FamilyName = familyInstance.Symbol.FamilyName,
+                                Orientation = new Vector() { X = familyInstance.FacingOrientation.X.Normalize(), 
+                                    Y = familyInstance.FacingOrientation.Y.Normalize(), Z = familyInstance.FacingOrientation.Z.Normalize() },
+                                HandOrientation = new Vector() { X = familyInstance.HandOrientation.X.Normalize(), 
+                                    Y = familyInstance.HandOrientation.Y.Normalize(), Z = familyInstance.HandOrientation.Z.Normalize() },
                                 Type = familyInstance.Category.Id.IntegerValue == -2000014 ? ElementType.Window : ElementType.Door,
                                 Name = $"{familyInstance.Name}",
-                                Point = new Point() { X = location.Point.X, Y = location.Point.Y },
+                                Point = new Point() { X = location.Point.X.Normalize(), Y = location.Point.Y.Normalize() },
                                 BoundingBox = GetRectangleFromBoundingBox(boundingBox)
                             };
 
@@ -233,6 +255,60 @@ namespace Revit2Svg
             }
 
             return document;
+        }
+
+        private double GetAngleFromDirectionVector(double x, double y)
+        {
+            //0,1 = 0; 1,0 = 90; 0,-1 = 180; -1,0 = 270
+            var angle = Math.Atan2(x, y);
+            var degrees = 180 * angle / Math.PI;
+            return ((360 + Math.Round(degrees)) % 360);
+        }
+
+        private string DrawDoor(double rectX, double rectY, double rectWidth, double rectHeight, string type, Vector orientation, Vector handOrientation)
+        {
+            var rotation = GetAngleFromDirectionVector(orientation.X, orientation.Y);
+
+            if (type.Contains("Sliding"))
+            {
+                if (rectWidth > rectHeight)
+                {
+                    var a = (rectWidth * 2) / 3;
+                    var b = rectWidth - a;
+
+                    return $@"<g>
+  <rect x=""{rectX}"" y=""{rectY}"" width=""{a}"" height=""{rectHeight / 2}"" style=""stroke:rgb(0,0,0);fill: none;stroke-width:1"" />
+  <rect x=""{rectX + b}"" y=""{rectY + (rectHeight / 2)}"" width=""{a}"" height=""{rectHeight / 2}"" style=""stroke:rgb(0,0,0);fill: none;stroke-width:1"" />
+</g>";
+                }
+                else
+                {
+                    var a = (rectHeight * 2) / 3;
+                    var b = rectHeight - a;
+
+                    return $@"<g>
+  <rect x=""{rectX}"" y=""{rectY}"" width=""{rectWidth / 2}"" height=""{a}"" style=""stroke:rgb(0,0,0);fill: none;stroke-width:1"" />
+  <rect x=""{rectX + (rectWidth / 2)}"" y=""{rectY + b}"" width=""{rectWidth / 2}"" height=""{a}"" style=""stroke:rgb(0,0,0);fill: none;stroke-width:1"" />
+</g>";
+                }
+            }
+            else if (type.Contains("Double"))
+            {
+                return $@"<g transform=""rotate({rotation} {rectX + (rectWidth / 2)} {rectY + (rectHeight / 2)})"">
+  <path d=""M{rectX} {rectY} C {rectX + (rectWidth / 2)} {rectY}, {rectX + (rectWidth / 2)} {rectY + (rectHeight / 2)}, {rectX + (rectWidth / 2)} {rectY + rectHeight}"" stroke=""black"" fill=""transparent""/>
+  <path d=""M{rectX + rectWidth} {rectY} C {rectX + (rectWidth / 2)} {rectY}, {rectX + (rectWidth / 2)} {rectY + (rectHeight / 2)}, {rectX + (rectWidth / 2)} {rectY + rectHeight}"" stroke=""black"" fill=""transparent""/>
+  <rect x=""{rectX}"" y=""{rectY}"" width=""3"" height=""{rectHeight}"" style=""stroke:rgb(0,0,0);fill: none;stroke-width:1"" />
+  <rect x=""{rectX}"" y=""{rectY + rectHeight}"" width=""{rectWidth}"" height=""3"" style=""stroke:rgb(0,0,0);fill: none;stroke-width:1"" />
+  <rect x=""{rectX + rectWidth - 3}"" y=""{rectY}"" width=""3"" height=""{rectHeight}"" style=""stroke:rgb(0,0,0);fill: none;stroke-width:1"" />
+</g>";
+            }
+
+            return $@"<g transform=""rotate({rotation} {rectX + (rectWidth / 2)} {rectY + (rectHeight / 2)})"">
+  <path d=""M{rectX} {rectY} C {rectX + (rectWidth / 2)} {rectY}, {rectX + rectWidth} {rectY + (rectHeight / 2)}, {rectX + rectWidth} {rectY + rectHeight}"" stroke=""black"" fill=""transparent""/>
+  <rect x=""{rectX}"" y=""{rectY}"" width=""3"" height=""{rectHeight}"" style=""stroke:rgb(0,0,0);fill: none;stroke-width:1"" />
+  <rect x=""{rectX}"" y=""{rectY + rectHeight}"" width=""{rectWidth}"" height=""3"" style=""stroke:rgb(0,0,0);fill: none;stroke-width:1"" />
+</g>";
+
         }
 
         private Line FixLine(Autodesk.Revit.DB.Line line, BoundingBoxXYZ boundingBox)
